@@ -1,34 +1,43 @@
-# ALWAYSON • Galaxy A16 AOD Clock Initialization Test
+# ALWAYSON • Galaxy A16 AOD Diagnostics v0.2
 
-An **experimental LSPosed module APK**, targeting **Samsung Galaxy A16 SM-A165F** with **AODService 8.9.65.92**, One UI 9 and Android 17 (API 37). It is **not** a complete native Always On Display port.
+Experimental **LSPosed module** for a Samsung Galaxy A16 SM-A165F (Android 17 / One UI 9).
 
-## Hypothesis
+## What's included
 
-The donor AODService detects `clockpackversion=7` and skips initialization of its built-in AOD clock definitions. At startup the AOD clock list can be empty; a default-clock lookup then attempts to access item 0, causing `IndexOutOfBoundsException`. This app hooks `aod.qr0.j(Context)` and temporarily sets the internal `aod.ha6.w` flag to `false` **only during the clock-list initialization call**. It restores the original flag afterward, including when the hooked method throws.
+- **Original AODService hook (unchanged):** For donor AODService 8.9.65.92, temporarily changes `aod.ha6.w` during `aod.qr0.j(Context)` clock-list initialization, then restores its previous value. This prevented the previously observed startup crash, allowing AOD settings to open. Do not assume it enables actual display rendering.
+- **New SystemUI diagnostic hook (read-only):** Observes `AmbientDisplayConfiguration.alwaysOnAvailable()` and `alwaysOnEnabled(int)`, logging returned values to Android logcat under tag `A16AODEligibility` and LSPosed logs. The two known framework class paths are tried. No return values, AOD settings, or display states are modified.
 
-The hook is **experimental** and relies on obfuscated names from the supplied AODService **8.9.65.92** APK. Its success and any improvement to native AOD rendering have **not** been verified on a Galaxy A16.
+The device still entered `DOZE` rather than `DOZE_AOD` before this diagnostic build. This module seeks to determine why, not force the transition.
 
-## Building
+## Build
 
-GitHub Actions builds the debug APK on pushes to `main` and can also be started using the **Actions** tab. Open the `Build A16 AOD Clock Init LSPosed Test` workflow and download its `A16-AOD-Clock-Init-Test-APK` artifact from a successful run.
+GitHub Actions automatically builds a debug APK on pushes to `main`. Download the `A16-AOD-Clock-Init-Test-APK` artifact from the latest successful **Build A16 AOD Clock Init LSPosed Test** run. Local build: `gradle :app:assembleDebug` (JDK 17, Gradle 8.10.2).
 
-For a local build with the Android SDK and JDK 17: `gradle :app:assembleDebug` (Gradle 8.10.2 / Android SDK 35).
+## Install and capture
 
-The `xposedstubs` module supplies *compile-only* API signatures; the actual LSPosed API is supplied at runtime. These stub classes are not included in the installable APK.
+1. Keep the known-working donor AODService installation and existing rollback method. Leave old `shalomp_aod_16` and `fullaodenable` disabled.
+2. Install the updated debug APK over v0.1; the application ID is unchanged (`dev.a16.aodclocktest`).
+3. In **LSPosed Manager**, enable this module and select **both** scopes: `com.samsung.android.app.aodservice` and **System UI** (`com.android.systemui`). Do not scope it broadly to other apps. LSPosed must inject into SystemUI to log its results.
+4. Reload the scoped processes using the restart method already proven safe on this device. If SystemUI cannot be safely reloaded, reboot normally instead. The temporary AOD overlay and temp root may need re-establishment after reboot.
+5. Lock the phone, unlock it, then run:
 
-## Phone testing
+   ```sh
+   su -c 'logcat -d -v time -s A16AODEligibility:I'
+   ```
 
-1. Preserve an existing working recovery/rollback method. The target is experimental and may destabilize the lock screen.
-2. Keep old `shalomp_aod_16` and `fullaodenable` KernelSU modules **disabled**.
-3. Enable only the donor `aodservice_896592_test` module and verify Android recognizes its APK before using the hook.
-4. Install the built APK normally (not as a KernelSU ZIP). In LSPosed Manager, enable **A16 AOD Clock Init Test** and scope it **only** to `com.samsung.android.app.aodservice`.
-5. Use the already-established restart/soft-reboot approach to reload the target process.
-6. Open the AOD setting once and inspect **LSPosed logs** for `A16AODClockTest:` and Android's crash logs for the previous `IndexOutOfBoundsException`.
+   Or check LSPosed logs for `A16AODEligibility`. Do not publish unrelated log lines that could contain private data.
 
-If the crash disappears, that supports the clock-list hypothesis but **does not prove actual AOD is working**. If it persists, the parsing path may have failed or the hook may have loaded too late. Do not force SELinux changes, privileges, or display modes as a workaround.
+6. Expected messages include `hooked ...alwaysOnEnabled(int)` and `alwaysOnEnabled(user=0) => true/false`. If only `hooked` appears, the method may not have been called after module load, or Samsung may use a different decision path. If `hookedMethods=0`, the targeted classes or method signatures differ on this firmware.
+
+## Interpretation
+
+- `alwaysOnAvailable() => false`: Resource availability or framework eligibility still fails in the SystemUI process.
+- `alwaysOnEnabled(user=...) => false`: The Android-framework eligibility decision is blocking AOD.
+- Both return `true` and DozeMachine still chooses `DOZE`: Investigate Samsung-specific DozeMachine logic; no proof yet.
+- Missing results are inconclusive; check SystemUI scope and log entries first.
+
+No live-device validation of the v0.2 build is claimed.
 
 ## Rollback
 
-Disable the APK module in LSPosed and restart its target process. For the prior known-working baseline, disable the separate donor AODService KernelSU module. This test does not modify ClockPack, Samsung's signed AOD APK, SELinux, or system partitions.
-
-**No on-device testing has been performed for this build.**
+In LSPosed, deselect the **System UI** scope to remove diagnostic hooks; retain the AODService scope for the original crash fix. Alternatively disable the whole module, then restart affected processes. This APK does not modify SELinux, ClockPack, firmware partitions, or the display driver.

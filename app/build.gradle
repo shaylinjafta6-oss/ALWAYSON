@@ -6,8 +6,8 @@ android {
         applicationId 'dev.a16.aodclocktest'
         minSdk 35
         targetSdk 35
-        versionCode 1
-        versionName '0.1-test'
+        versionCode 2
+        versionName '0.2-diagnostics'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
