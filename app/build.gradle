@@ -1,0 +1,18 @@
+plugins { id 'com.android.application' version '8.8.2' }
+android {
+    namespace 'dev.a16.aodclocktest'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'dev.a16.aodclocktest'
+        minSdk 35
+        targetSdk 35
+        versionCode 1
+        versionName '0.1-test'
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    buildTypes { release { minifyEnabled false } }
+}
+dependencies { compileOnly project(':xposedstubs') }
