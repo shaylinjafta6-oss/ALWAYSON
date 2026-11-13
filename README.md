@@ -1,43 +1,43 @@
-# ALWAYSON • Galaxy A16 AOD Diagnostics v0.2
+# ALWAYSON • Galaxy A16 AOD Diagnostics v0.3
 
-Experimental **LSPosed module** for a Samsung Galaxy A16 SM-A165F (Android 17 / One UI 9).
+Experimental LSPosed module targeting **Samsung Galaxy A16 SM-A165F**, One UI 9 / Android 17.
 
-## What's included
+## Features
 
-- **Original AODService hook (unchanged):** For donor AODService 8.9.65.92, temporarily changes `aod.ha6.w` during `aod.qr0.j(Context)` clock-list initialization, then restores its previous value. This prevented the previously observed startup crash, allowing AOD settings to open. Do not assume it enables actual display rendering.
-- **New SystemUI diagnostic hook (read-only):** Observes `AmbientDisplayConfiguration.alwaysOnAvailable()` and `alwaysOnEnabled(int)`, logging returned values to Android logcat under tag `A16AODEligibility` and LSPosed logs. The two known framework class paths are tried. No return values, AOD settings, or display states are modified.
+- **v0.1 AODService clock-list initialization fix (unchanged):** Retains the working scoped hook for donor AODService 8.9.65.92.
+- **v0.2 AOD eligibility diagnostics (unchanged):** Read-only tracing of `AmbientDisplayConfiguration.alwaysOnAvailable()` and `alwaysOnEnabled(int)` in SystemUI.
+- **v0.3 DozeMachine diagnostics (new):** Read-only tracing of `DozeMachine.resolveIntermediateState`, `transitionTo`, `transitionPolicy`, and `DozeParameters.getAlwaysOn` (where available). Events are logged under `A16AODTrace` for the **main SystemUI process only**. Do not force or replace any return value or screen state.
 
-The device still entered `DOZE` rather than `DOZE_AOD` before this diagnostic build. This module seeks to determine why, not force the transition.
+The version 0.2 hooks loaded correctly into the main SystemUI process but produced no method-call results when the screen was locked. v0.3 observes the directly relevant DozeMachine transition path instead.
 
 ## Build
 
-GitHub Actions automatically builds a debug APK on pushes to `main`. Download the `A16-AOD-Clock-Init-Test-APK` artifact from the latest successful **Build A16 AOD Clock Init LSPosed Test** run. Local build: `gradle :app:assembleDebug` (JDK 17, Gradle 8.10.2).
+This repository builds on GitHub Actions on pushes to `main`. Download `A16-AOD-Clock-Init-Test-APK` from the latest successful run. The artifact name is unchanged for compatibility with the workflow.
 
-## Install and capture
+## Install and test
 
-1. Keep the known-working donor AODService installation and existing rollback method. Leave old `shalomp_aod_16` and `fullaodenable` disabled.
-2. Install the updated debug APK over v0.1; the application ID is unchanged (`dev.a16.aodclocktest`).
-3. In **LSPosed Manager**, enable this module and select **both** scopes: `com.samsung.android.app.aodservice` and **System UI** (`com.android.systemui`). Do not scope it broadly to other apps. LSPosed must inject into SystemUI to log its results.
-4. Reload the scoped processes using the restart method already proven safe on this device. If SystemUI cannot be safely reloaded, reboot normally instead. The temporary AOD overlay and temp root may need re-establishment after reboot.
-5. Lock the phone, unlock it, then run:
+1. Keep old `shalomp_aod_16` and `fullaodenable` disabled. Preserve rollback access.
+2. Install v0.3 APK over v0.2; the application ID is unchanged.
+3. In LSPosed Manager, enable **A16 AOD Clock Init Test** with scopes **com.samsung.android.app.aodservice** and **System UI** (`com.android.systemui`) only.
+4. Reload main SystemUI using a method already proven safe on the device. The previous test restarted only the main SystemUI process via a TERM signal and it respawned without a full device reboot. Avoid doing this repeatedly if the interface becomes unstable.
+5. Lock the phone for 10-15 seconds, then unlock.
+6. Run:
 
    ```sh
-   su -c 'logcat -d -v time -s A16AODEligibility:I'
+   su -c 'logcat -d -b all -v brief | grep "A16AODTrace" | tail -n 60'
    ```
 
-   Or check LSPosed logs for `A16AODEligibility`. Do not publish unrelated log lines that could contain private data.
+   The key values to inspect are `DozeParameters.getAlwaysOn() result=...`, `transitionTo requested=...`, and `transitionPolicy requested=... result=...`.
 
-6. Expected messages include `hooked ...alwaysOnEnabled(int)` and `alwaysOnEnabled(user=0) => true/false`. If only `hooked` appears, the method may not have been called after module load, or Samsung may use a different decision path. If `hookedMethods=0`, the targeted classes or method signatures differ on this firmware.
+## Reading results
 
-## Interpretation
+- `DozeParameters.getAlwaysOn() result=false`: An AOD gate returns false even if configuration flags are true.
+- `transitionTo requested=DOZE` and no `DOZE_AOD` request: machine chooses ordinary Doze before displaying.
+- `transitionPolicy requested=DOZE_AOD result=DOZE`: machine policy suppresses or rewrites AOD; investigate why.
+- No `A16AODTrace` after the main process reload: confirm LSPosed scope and whether methods exist on this Samsung firmware.
 
-- `alwaysOnAvailable() => false`: Resource availability or framework eligibility still fails in the SystemUI process.
-- `alwaysOnEnabled(user=...) => false`: The Android-framework eligibility decision is blocking AOD.
-- Both return `true` and DozeMachine still chooses `DOZE`: Investigate Samsung-specific DozeMachine logic; no proof yet.
-- Missing results are inconclusive; check SystemUI scope and log entries first.
-
-No live-device validation of the v0.2 build is claimed.
+The hook prints successful install counts and does not change any behavior. No live-device validation of v0.3 is claimed.
 
 ## Rollback
 
-In LSPosed, deselect the **System UI** scope to remove diagnostic hooks; retain the AODService scope for the original crash fix. Alternatively disable the whole module, then restart affected processes. This APK does not modify SELinux, ClockPack, firmware partitions, or the display driver.
+Deselect System UI scope and reload SystemUI to remove diagnostic hooks while preserving the AODService fix. Or disable the module entirely and reload both relevant processes. No firmware, display driver, ClockPack, or SELinux changes are made.
