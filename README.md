@@ -1,38 +1,46 @@
-# ALWAYSON • Galaxy A16 AOD Diagnostics v0.5
+# ALWAYSON • Samsung Galaxy A16 v0.6
 
-Experimental LSPosed module for Galaxy A16 SM-A165F, One UI 9 / Android 17.
+Experimental LSPosed module targeting Galaxy A16 SM-A165F, Android 17 / One UI 9. Preserve your working AODService 8.9.65.92 and rollback access.
 
-## Current findings
+## Finding from the user's original SystemUI APK
 
-- Donor AODService 8.9.65.92's clock-list crash is addressed by the **unchanged** AODService-only hook (first added in v0.1).
-- SystemUI's `DozeParameters.getAlwaysOn()` changes to `true` when the fabricated `config_dozeAlwaysOnDisplayAvailable` overlay is active.
-- **Even when this returns true**, main SystemUI still explicitly requests `DOZE` rather than `DOZE_AOD`.
-- The firmware's `DozeMachine` has no hookable `resolveIntermediateState` or `transitionPolicy` methods with those names; its `mAODUi` and `mAODScreenBrightness` were null. This is not proof hardware cannot support AOD.
+The **actual Samsung DozeService** contains two branches in `onCreate()`:
 
-## What's new
+- If `PluginFaceWidgetManager.mIsConnected` is true, it directly registers a plugin listener with the Samsung `PluginManager` for either `PluginClockPack` or `PluginAOD`, according to `LsRune.LOCKUI_AOD_PACKAGE_AVAILABLE`.
+- If FaceWidget is not connected, it enqueues `mPluginConnectionRunnable` in `PluginAODManager.mConnectionRunnableList`. This runnable registers that same listener later.
+- `onDreamingStarted()` calls `startClockPack()` when `LOCKUI_AOD_PACKAGE_AVAILABLE` is true. It logs `mClockPackPlugin=null` when no plugin has connected, so the plugin's `onDreamingStarted` is skipped.
+- `onRequestShowDoze()` explicitly requests `DozeMachine.State.DOZE_AOD`, but the user's logs only show `DOZE`.
 
-**v0.5 adds a strictly read-only `A16AODOrigin` hook** in *main SystemUI*:
-- Capture the SystemUI caller stack for the first two ordinary `DOZE` transition requests.
-- List the classes of installed `DozeMachine.mParts`, if accessible.
-- Does **not** change methods, return values, transition requests, system settings, display modes, ClockPack or SELinux.
+The user has independently confirmed the ClockPack service action can be discovered, but has repeatedly observed `startClockPack: mClockPackPlugin=null`.
 
-Existing v0.4 `A16AODTrace` and v0.2 `A16AODEligibility` remain, as does the AODService crash workaround. The package ID is unchanged.
+## Targeted trial in v0.6
 
-## Install / capture
+**New:** `AodClockPackRegistrationHook` installs an after-hook for `DozeService.onCreate()` in the main SystemUI process.
 
-1. Keep the working donor AODService 8.9.65.92 and its supporting modules mounted; keep old donor `shalomp_aod_16` and `fullaodenable` disabled.
-2. Download the successful GitHub Actions artifact named `A16-AOD-Clock-Init-Test-APK` and install over v0.4.
-3. In LSPosed Manager, enable this module for **Samsung AODService** and **System UI** only.
-4. Before restarting SystemUI, confirm the overlay is active (`cmd overlay lookup android android:bool/config_dozeAlwaysOnDisplayAvailable` should return `true`). If root or the overlay does not survive restart, restore those separately; don't assume they persisted.
-5. Reload the main SystemUI process via the recovery method already tested on the device, rather than performing an unnecessary full reboot. Then lock and unlock the phone once.
-6. In Termux:
+After onCreate finishes, **only if** the exact stock `mPluginConnectionRunnable` is sitting in Samsung's deferred `mConnectionRunnableList` and the Doze machine/plugin manager exist, it executes Samsung's own registration runnable. On success it removes that callback from the deferred list to avoid a duplicate listener later. If any precondition fails, it leaves stock behavior unchanged.
+
+This tests whether waiting for FaceWidget is the blocking dependency. It does not forge plugin objects, manipulate `DOZE_AOD` or screen states, change settings, SELinux, partitions, hardware or the AODService crash hook. It is experimental and could expose ClockPack/plugin compatibility errors.
+
+All v0.1-v0.5 hooks are retained unchanged.
+
+## Test
+
+1. Install the new GitHub Actions build artifact `A16-AOD-Clock-Init-Test-APK` over v0.5.
+2. In LSPosed, scope it to **Samsung AODService** and **System UI**.
+3. Soft-restart the main SystemUI process (not a full reboot if root is temporary):
 
    ```sh
-   su -c 'logcat -d -b all -v brief | grep A16AODOrigin | tail -n 55'
+   su -c 'pid=$(pidof com.android.systemui); [ -n "$pid" ] && kill -TERM "$pid"'
    ```
 
-7. Expect the `DOZE caller[n]` entries and `part[n]` classes. No call stack means the hook failed, the process didn't reload or `DOZE` wasn't requested in the captured period.
+4. Lock and unlock the phone, then run **one** check:
+
+   ```sh
+   su -c 'logcat -d -b all -v brief | grep -E "A16AODRegistration|startClockPack:|onPluginConnected: PluginClockPack" | tail -n 30'
+   ```
+
+Success for this test means a real ClockPack connection is logged or `startClockPack` reports a non-null plugin. A working AOD screen is a separate test, not guaranteed. The previously fabricated `config_dozeAlwaysOnDisplayAvailable` overlay may be false after reboot, but that is independent of this specific plugin registration test.
 
 ## Rollback
 
-Disable System UI in the LSPosed scope and reload that process to stop the diagnostic hooks while keeping the AODService crash fix enabled. Alternatively reinstall the previously working v0.4 APK. No partitions are modified.
+Disable the module's **System UI** scope in LSPosed and reload SystemUI to stop this experiment while preserving the **Samsung AODService** scope and crash fix. Alternatively install the previous v0.5 APK. No partitions are changed.
