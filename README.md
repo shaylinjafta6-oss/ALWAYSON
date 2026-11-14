@@ -1,43 +1,40 @@
-# ALWAYSON • Galaxy A16 AOD Diagnostics v0.3
+# ALWAYSON • Galaxy A16 AOD Diagnostics v0.4
 
-Experimental LSPosed module targeting **Samsung Galaxy A16 SM-A165F**, One UI 9 / Android 17.
+Experimental LSPosed module targeting Samsung Galaxy A16 SM-A165F with One UI 9 / Android 17.
 
-## Features
+## Modules
 
-- **v0.1 AODService clock-list initialization fix (unchanged):** Retains the working scoped hook for donor AODService 8.9.65.92.
-- **v0.2 AOD eligibility diagnostics (unchanged):** Read-only tracing of `AmbientDisplayConfiguration.alwaysOnAvailable()` and `alwaysOnEnabled(int)` in SystemUI.
-- **v0.3 DozeMachine diagnostics (new):** Read-only tracing of `DozeMachine.resolveIntermediateState`, `transitionTo`, `transitionPolicy`, and `DozeParameters.getAlwaysOn` (where available). Events are logged under `A16AODTrace` for the **main SystemUI process only**. Do not force or replace any return value or screen state.
+- **AODService clock-list crash workaround:** Existing v0.1 hook remains unchanged and only runs in `com.samsung.android.app.aodservice`, for donor AODService 8.9.65.92.
+- **Android AOD eligibility hook:** Existing v0.2 read-only hooks remain, scoped to SystemUI.
+- **DozeMachine decision tracing (v0.4):** Logs `transitionTo`, `resolveIntermediateState` and `transitionPolicy` calls, plus an inspection of selected DozeMachine fields whenever INITIALIZED, DOZE or DOZE_AOD is requested. When a relevant field is an `AmbientDisplayConfiguration`, the diagnostic also reads its `alwaysOnEnabled(user=0)` result; it does not replace the result. Repetitive `DozeParameters.getAlwaysOn()` logging is now sampled to avoid hiding transition events.
 
-The version 0.2 hooks loaded correctly into the main SystemUI process but produced no method-call results when the screen was locked. v0.3 observes the directly relevant DozeMachine transition path instead.
+The prior v0.3 logs showed `DozeParameters.getAlwaysOn() result=true`, but `DozeMachine` still requested `DOZE` instead of `DOZE_AOD`. AOSP's DozeMachine examines the AmbientDisplayConfiguration object directly on some Android versions. Samsung might use an additional firmware-specific decision. This diagnostic seeks to distinguish those possibilities.
 
 ## Build
 
-This repository builds on GitHub Actions on pushes to `main`. Download `A16-AOD-Clock-Init-Test-APK` from the latest successful run. The artifact name is unchanged for compatibility with the workflow.
+GitHub Actions builds on pushes to `main`. Download the artifact `A16-AOD-Clock-Init-Test-APK` from the latest successful workflow run. Local: Gradle 8.10.2, Android SDK 35, JDK 17.
 
-## Install and test
+## Installation & usage
 
-1. Keep old `shalomp_aod_16` and `fullaodenable` disabled. Preserve rollback access.
-2. Install v0.3 APK over v0.2; the application ID is unchanged.
-3. In LSPosed Manager, enable **A16 AOD Clock Init Test** with scopes **com.samsung.android.app.aodservice** and **System UI** (`com.android.systemui`) only.
-4. Reload main SystemUI using a method already proven safe on the device. The previous test restarted only the main SystemUI process via a TERM signal and it respawned without a full device reboot. Avoid doing this repeatedly if the interface becomes unstable.
-5. Lock the phone for 10-15 seconds, then unlock.
-6. Run:
+1. Keep the correctly mounted donor AODService 8.9.65.92 active and the conflicting old AODService / fullaodenable modules disabled. Preserve rollback access.
+2. Install the updated APK over v0.3 (same Android application ID `dev.a16.aodclocktest`).
+3. In LSPosed Manager, enable the module only for **Samsung AODService** and **System UI**.
+4. Reload the main SystemUI process using the previously working method; do not reboot if temporary root needs preserving.
+5. Lock the phone for 10-15 seconds; unlock and run:
 
    ```sh
-   su -c 'logcat -d -b all -v brief | grep "A16AODTrace" | tail -n 60'
+   su -c 'logcat -d -b all -v brief | grep "A16AODTrace" | tail -n 80'
    ```
 
-   The key values to inspect are `DozeParameters.getAlwaysOn() result=...`, `transitionTo requested=...`, and `transitionPolicy requested=... result=...`.
+6. Check `hooked ... count=`, `machine.<field>.alwaysOnEnabled(user=0) =>`, and `transitionTo requested=...`.
 
-## Reading results
+## Interpreting the logs
 
-- `DozeParameters.getAlwaysOn() result=false`: An AOD gate returns false even if configuration flags are true.
-- `transitionTo requested=DOZE` and no `DOZE_AOD` request: machine chooses ordinary Doze before displaying.
-- `transitionPolicy requested=DOZE_AOD result=DOZE`: machine policy suppresses or rewrites AOD; investigate why.
-- No `A16AODTrace` after the main process reload: confirm LSPosed scope and whether methods exist on this Samsung firmware.
+- Machine's own configuration says `alwaysOnEnabled(user=0) => false`: that is a candidate explanation for `DOZE` despite DozeParameters reporting true.
+- Machine configuration says true but transition is still DOZE: likely a different Samsung-specific gate; further investigation needed.
+- No machine configuration field found: Samsung uses a different code structure; inspect installed method counts.
+- No DOZE_AOD request: no evidence yet that display hardware can render AOD.
 
-The hook prints successful install counts and does not change any behavior. No live-device validation of v0.3 is claimed.
+### Safety & rollback
 
-## Rollback
-
-Deselect System UI scope and reload SystemUI to remove diagnostic hooks while preserving the AODService fix. Or disable the module entirely and reload both relevant processes. No firmware, display driver, ClockPack, or SELinux changes are made.
+The hooks never change state arguments, return values, settings, SELinux, ClockPack or display-driver controls. Inspection uses read-only reflection and invokes only known getter methods. Deselect System UI in LSPosed and reload it to remove diagnostic hooks while preserving the AODService crash fix. No on-device validation of v0.4 is claimed.
