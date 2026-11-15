@@ -6,8 +6,8 @@ android {
         applicationId 'dev.a16.aodclocktest'
         minSdk 35
         targetSdk 35
-        versionCode 9
-        versionName '0.9-native-aod-plugin'
+        versionCode 10
+        versionName '0.10-aod-plugin-clock-init'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
