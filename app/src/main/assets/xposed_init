@@ -2,5 +2,6 @@ dev.a16.aodclocktest.AodClockInitHook
 dev.a16.aodclocktest.AodEligibilityHook
 dev.a16.aodclocktest.AodDozeTraceHook
 dev.a16.aodclocktest.AodTransitionOriginHook
+dev.a16.aodclocktest.AodPluginSelectionHook
 dev.a16.aodclocktest.AodClockPackRegistrationHook
 dev.a16.aodclocktest.AodForceOnceHook
