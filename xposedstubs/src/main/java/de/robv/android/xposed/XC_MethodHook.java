@@ -11,6 +11,7 @@ public abstract class XC_MethodHook {
         public void setObjectExtra(String key, Object value) { extras.put(key, value); }
         public Object getObjectExtra(String key) { return extras.get(key); }
         public Object getResult() { return null; }
+        public boolean hasThrowable() { return false; }
     }
     public static class Unhook {}
 }
