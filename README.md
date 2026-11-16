@@ -1,31 +1,32 @@
-ALWAYSON v0.10 - experimental SystemUI AOD plugin initialization fix.
+# ALWAYSON v0.11 - one-shot donor DB schema test
 
-The A16 SystemUI APK uses PluginInstance.loadPlugin, which invokes
-PluginFactory.createPlugin before invoking the plugin onCreate callback.
-When the donor AODService PluginAODImpl object is created, this version
-hooks onCreate(Context,Context) and aod.qr0.j(Context) using its exact
-plugin ClassLoader. Each hook temporarily sets aod.ha6.w=false and restores
-its old value afterwards, as in the previously working AODService crash fix.
+The device's logs showed `PluginAODImpl.onCreate` raising `Index 0 out of bounds` and, in the **same SystemUI process**, `SQLiteException: no such table: table_settings`.
 
-The SystemUI plugin onCreate error "Index 0 out of bounds for length 0" is
-not necessarily the same clock-list exception. The missing SQLite table in
-a separate AODService process is an additional unconfirmed issue.
-No database, display power, firmware partitions, or vendor config is changed.
+Inspection of donor AODService 8.9.65.92 confirms that `DBManager.init(Context,true)` and `AODSettingsDBItem.getCreateTableSQL()` can provision this table using `CREATE TABLE IF NOT EXISTS`. This version tries that path once, before native AOD plugin initialization. It does NOT blindly invent table columns, clear app data, or touch system partitions.
 
-The v0.9 opt-in native AOD plugin selection and v0.7 one-shot AOD state test
-are unchanged. Keep ClockPack's duplicate FaceWidget provider disabled.
+The secure setting `a16_repair_aod_schema_once` must be set to 1 first. The hook checks for the actual AODService plugin Context and unlocked user storage, then disarms the trigger BEFORE any DB operation. It uses the donor's DBManager and checks if the table exists. If still absent, it executes the donor's table-creation SQL in a transaction. No existing rows or tables are deleted. Created tables are persistent and rollback of the hook does not revert them.
 
-Install the v0.10 APK from GitHub Actions over v0.9. LSPosed scope: System UI
-and Samsung AODService. With root:
+The original AODService crash fix, v0.9 native plugin selector, v0.10 plugin clock fallback and v0.7 optional forced DOZE_AOD test remain intact. The SQLite failure may not be the only reason for blank AOD; successful compilation is not proof that AOD renders.
 
-su -c 'settings put secure a16_select_native_aod_plugin 1; settings put secure a16_force_doze_aod_once 0; pid=$(pidof com.android.systemui); [ -n "$pid" ] && kill -TERM "$pid"'
+## Installation / single test
+- Install the built GitHub Actions APK over v0.10.
+- LSPosed scopes: System UI and Samsung AODService. Leave only the duplicate ClockPack FaceWidget provider disabled.
+- Run:
 
-Lock for 15s, unlock. Inspect the result:
+```sh
+su -c 'settings put secure a16_select_native_aod_plugin 1; settings put secure a16_force_doze_aod_once 0; settings put secure a16_repair_aod_schema_once 1; pid=$(pidof com.android.systemui); [ -n "$pid" ] && kill -TERM "$pid"'
+```
 
-su -c 'logcat -d -b all -v brief | grep -E "A16AODPluginInit|PluginAODImpl.*onCreate:|onPluginConnected: PluginAOD|startAlwaysOnDisplay" | tail -n 35'
+- Lock for 15 seconds and unlock. Check once:
 
-A successful build is not proof of working AOD. If SystemUI misbehaves,
-disable the System UI scope in LSPosed, soft restart SystemUI, or reinstall
-v0.9. You can disarm plugin route via:
+```sh
+su -c 'logcat -d -b all -v brief | grep -E "A16AODSchema|PluginAODImpl.*onCreate:|onPluginConnected: PluginAOD|startAlwaysOnDisplay" | tail -n 40'
+```
 
-su -c 'settings put secure a16_select_native_aod_plugin 0; settings put secure a16_force_doze_aod_once 0'
+## Rollback
+
+```sh
+su -c 'settings put secure a16_repair_aod_schema_once 0; settings put secure a16_select_native_aod_plugin 0; settings put secure a16_force_doze_aod_once 0'
+```
+
+If SystemUI is unstable, disable its ALWAYSON scope in LSPosed and soft-restart SystemUI, or reinstall v0.10. A database schema created by this module remains until independently restored from a backup.
