@@ -6,8 +6,8 @@ android {
   applicationId 'dev.a16.aodclocktest'
   minSdk 35
   targetSdk 35
-  versionCode 11
-  versionName '0.11-donor-db-schema-test'
+  versionCode 12
+  versionName '0.12-donor-aod-clock-list'
  }
  compileOptions {
   sourceCompatibility JavaVersion.VERSION_17
