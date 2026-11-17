@@ -1,46 +1,43 @@
-# ALWAYSON v0.12: Restore the native AOD clock list
+# ALWAYSON v0.13: optional faster transition from lock screen to AOD
 
-Experimental LSPosed APK targeting the Samsung Galaxy A16 SM-A165F with AODService 8.9.65.92 and One UI 9. It has **not** been verified to produce visible AOD.
+**Experimental.** This module preserves the Galaxy A16 SM-A165F One UI 9's already-working native Always On Display configuration from v0.12.
 
-## Evidence from user's logs and actual donor DEX
+## Problem
 
-- The AODService native PluginAODImpl is connected in SystemUI and startAlwaysOnDisplay() executes.
-- v0.7 showed real DOZE_AOD transition; v0.9 made SystemUI select PluginAODImpl.
-- The donor SQLite table_settings was missing; v0.11 created the missing table using Samsung's original schema (verified). The IndexOutOfBoundsException still occurred afterward.
-- Inspecting the actual 8.9.65.92 donor DEX shows that aod.qr0.h(Category) iterates the category's clock list for the default and, when absent, **calls ArrayList.get(0) without an emptiness check**.
-- aod.qr0.c(Category.AOD) copies aod.qr0.j, the AOD clock list.
-- aod.qr0.t(Context, Category, int XML resource, ArrayList) parses clock definitions from that Context's resources.
-- aod.nv5.clock_aod points to the built-in donor XML resource.
-- Running the QR0 flag fallback by itself in v0.10/v0.11 didn't populate this list in SystemUI.
+Native AOD is visible with v0.12, but the user reports about 1 to 3 seconds of black screen after pressing lock. Earlier on-device testing with v0.7 proved that a call to Samsung's genuine `DozeService.onRequestShowDoze()` causes the machine to enter `DOZE_AOD`; v0.12 subsequently fixed the native clock list and plugin registration. The plugin's normal asynchronous AOD request may arrive later than the start of the doze dream. We have not yet proven this is the cause of the 1–3s delay.
 
-## New targeted intervention
+## New opt-in test
 
-The v0.12 hook installs through the real Samsung PluginFactory into the actual AODService plugin ClassLoader. Before PluginAODImpl.onCreate(Context systemUi, Context donorApp), it checks if the cached aod.qr0.j list is empty. Only then, using **donorApp context** (validated by its package name) rather than the SystemUI context, it verifies the donor clock_aod XML resource opens, invokes Samsung's own qr0.t(parser) into a temporary list, checks the parsed objects are genuine Samsung ClockInfo, and appends them to the cached list. The module does not fabricate ClockInfo, clear any app databases, replace resources, or modify kernel settings. If XML parsing fails or produces no clocks it makes no list changes, logging the reason.
+Add `AodFastStartHook` to the main SystemUI process. When secure setting `a16_fast_aod_start=1`, it observes `DozeService.onDreamingStarted()`. **After** the normal method has executed and started the real `PluginAODImpl`, it checks:
+- Samsung AOD setting is enabled and battery saver is off;
+- Samsung native `mAODPlugin` has connected;
+- the real Samsung Doze machine is currently in `DOZE` and not already in `DOZE_AOD`.
 
-We retain the v0.11 schema code but it is **one-shot and normally disarmed**, as well as the v0.10 temporary clock source workaround, v0.9 native plugin selector and v0.7 force-once test (normally disarmed).
+Only then it calls Samsung's existing `onRequestShowDoze()` immediately, instead of waiting for the plugin to request it asynchronously. It logs the call and resulting state. This does not turn off the screen manually, force panel brightness or kernel states, bypass hardware safeguards, or alter v0.12 clock-list repair.
 
-## Install/test
+This may reduce perceived lock-to-AOD delay, have no noticeable effect, or cause a transient display issue on an unsupported device. **Zero delay is not guaranteed** due to display hardware state changes and compositor/clock rendering. Leave this mode OFF unless explicitly testing.
 
-1. Download the successful GitHub Actions artifact A16-AOD-Clock-Init-Test-APK and install over v0.11.
-2. LSPosed scope: System UI and Samsung AODService. Keep ClockPack's duplicate FaceWidget provider **disabled**, but don't disable the whole ClockPack package.
-3. No more database writes: clear any leftover schema trigger, keep native route on, and forced doze off:
+## Single test
+
+1. Keep your working v0.12 APK available as rollback. Install the v0.13 GitHub Actions debug APK over v0.12 (same package signature and ID), with the same LSPosed scopes: System UI and Samsung AODService. Keep the ClockPack duplicate FaceWidget provider disabled.
+2. Arm the opt-in early start, disarm the obsolete one-shot forcing and database repair, keep the native plugin route enabled, and soft-restart SystemUI:
 
 ```sh
-su -c 'settings put secure a16_repair_aod_schema_once 0; settings put secure a16_force_doze_aod_once 0; settings put secure a16_select_native_aod_plugin 1; pid=$(pidof com.android.systemui); [ -n "$pid" ] && kill -TERM "$pid"'
+su -c 'settings put secure a16_fast_aod_start 1; settings put secure a16_select_native_aod_plugin 1; settings put secure a16_force_doze_aod_once 0; settings put secure a16_repair_aod_schema_once 0; pid=$(pidof com.android.systemui); [ -n "$pid" ] && kill -TERM "$pid"'
 ```
 
-4. Lock for 15 seconds and observe whether AOD is visible. Then use this **single check** if still black:
+3. Lock and unlock normally. Assess whether AOD appears faster or the lock screen behaves worse. Check the new log line only if necessary:
 
 ```sh
-su -c 'logcat -d -b all -v brief | grep -E "A16AODClockList|PluginAODImpl.*onCreate:|onPluginConnected: PluginAOD|startAlwaysOnDisplay" | tail -n 30'
+su -c 'logcat -d -b all -v brief | grep A16AODFastStart | tail -n 12'
 ```
 
-**Success:** report says 'Restored AOD clocks from donor XML' with a count >0, PluginAODImpl.onCreate no longer logs IndexOutOfBounds, and the actual clock renders on the panel. An unchanged error after restoring AOD clocks would indicate a different empty list or more than one incompatibility.
+## Disable the fast experiment instantly
 
-## Rollback
-
-To turn off the native plugin routing and any one-shot hooks:
 ```sh
-su -c 'settings put secure a16_select_native_aod_plugin 0; settings put secure a16_force_doze_aod_once 0; settings put secure a16_repair_aod_schema_once 0'
+su -c 'settings put secure a16_fast_aod_start 0'
 ```
-Deselect System UI in LSPosed and soft-restart SystemUI or reinstall v0.11 if the interface becomes unstable. The v0.12 clock-list edit is **in memory only** and disappears when SystemUI restarts. It does not undo the persistent table created by v0.11.
+
+This returns to native v0.12 transition behavior at the next lock (the module reads this setting on every dream). No SystemUI restart is needed to disable fast start. For full rollback, reinstall the previous v0.12 APK and soft-restart SystemUI. Avoid a full device reboot with temporary DirtyFrag root.
+
+Do not run if AOD is currently malfunctioning. If screen-off locking becomes unreliable, turn the setting off and use the working v0.12 configuration.

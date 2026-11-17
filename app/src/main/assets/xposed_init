@@ -7,4 +7,5 @@ dev.a16.aodclocktest.AodClockListRestoreHook
 dev.a16.aodclocktest.AodPluginInitHook
 dev.a16.aodclocktest.AodPluginSelectionHook
 dev.a16.aodclocktest.AodClockPackRegistrationHook
+dev.a16.aodclocktest.AodFastStartHook
 dev.a16.aodclocktest.AodForceOnceHook
